@@ -69,7 +69,7 @@ async def receive_webhook(request: Request):
 
         if (
             system_id == "userone" and
-            "bind_transmitter" in bind_type and
+            bind_type in ["bind_transmitter", "bind_transceiver"] and
             command_id == "CommandId.submit_sm"
         ):
             variables = ["967833"]  # You can generate or extract dynamically
