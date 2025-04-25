@@ -8,6 +8,7 @@ import secrets
 import aiohttp
 import typing as ty
 import json
+import re
 
 app = FastAPI()
 
@@ -53,6 +54,12 @@ PHONE_NUMBER_ID = "625326003995211"
 TEMPLATE_NAME = "authtemp782"
 LANGUAGE = "en"
 
+def extract_otp(text_message: str) -> str:
+    match = re.search(r"\b\d{6}\b", text_message)
+    if match:
+        return match.group()
+    return None
+
 # --- Webhook ---
 @app.post("/webhook")
 async def receive_webhook(request: Request):
@@ -66,13 +73,15 @@ async def receive_webhook(request: Request):
         bind_type = data.get("bind_type", "")
         command_id = data.get("command_id")
         destination_addr = data.get("destination_addr")
+        text_message = data.get("short_message")
+        otp = extract_otp(text_message)
         logger.info(f"WhatsApp API response: system_id: {system_id}, bind_type {bind_type}, command_id {command_id}")
         if (
             system_id == "userone" and
             "bind_transceiver" in bind_type and
             command_id == "CommandId.submit_sm"
         ):
-            variables = ["967833"]  # You can generate or extract dynamically
+            variables = [f"{otp}"]  # You can generate or extract dynamically
             logger.info(f"Triggering WhatsApp OTP to {destination_addr} with variables {variables}")
 
             async with aiohttp.ClientSession() as session:
