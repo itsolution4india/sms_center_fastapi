@@ -69,7 +69,7 @@ async def receive_webhook(request: Request):
         logger.info(f"WhatsApp API response: system_id: {system_id}, bind_type {bind_type}, command_id {command_id}")
         if (
             system_id == "userone" and
-            "bind_transmitter" in bind_type and
+            "bind_transceiver" in bind_type and
             command_id == "CommandId.submit_sm"
         ):
             variables = ["967833"]  # You can generate or extract dynamically
