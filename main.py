@@ -71,3 +71,8 @@ def get_logs(
             return {"log_lines": all_lines[-lines:]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read logs: {e}")
+
+@app.get("/")
+def root():
+    logger.info("Root endpoint accessed")
+    return {"message": "Send SMS API Successful"}
