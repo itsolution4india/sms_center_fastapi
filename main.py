@@ -9,6 +9,7 @@ import aiohttp
 import typing as ty
 import json
 import re
+import aiomysql
 
 app = FastAPI()
 
@@ -60,6 +61,71 @@ def extract_otp(text_message: str) -> str:
         return match.group()
     return None
 
+# --- Logs API ---
+@app.get("/logs")
+def get_logs(
+    lines: Optional[int] = 100,
+    user: str = Depends(authenticate)
+):
+    if not os.path.exists(log_path):
+        raise HTTPException(status_code=404, detail="Log file not found")
+
+    try:
+        with open(log_path, "r") as f:
+            all_lines = f.readlines()
+            return {"log_lines": all_lines[-lines:]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read logs: {e}")
+
+async def save_to_database(data):
+    pool = await aiomysql.create_pool(
+        host='localhost',
+        port=3306,
+        user='prashanth@itsolution4india.com',
+        password='Solution@97',
+        db='smsc_table',
+        autocommit=True
+    )
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                INSERT INTO smsc_responses (system_id, bindtype, username, session_id, source_addr, destination_addr, short_message, wamid, message_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                data.get("system_id"),
+                data.get("bind_type"),
+                data.get("username"),
+                data.get("session_id"),
+                data.get("source_addr"),
+                data.get("destination_addr"),
+                data.get("short_message"),
+                None,  # wamid (you can update later)
+                data.get("message_id")
+            ))
+    pool.close()
+    await pool.wait_closed()
+
+async def update_wamid_in_database(message_id: str, wamid: str):
+    pool = await aiomysql.create_pool(
+        host='localhost',
+        port=3306,
+        user='prashanth@itsolution4india.com',
+        password='Solution@97',
+        db='smsc_table',
+        autocommit=True
+    )
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                UPDATE smsc_responses
+                SET wamid = %s
+                WHERE message_id = %s
+            """, (wamid, message_id))
+    pool.close()
+    await pool.wait_closed()
+
 # --- Webhook ---
 @app.post("/webhook")
 async def receive_webhook(request: Request):
@@ -67,6 +133,8 @@ async def receive_webhook(request: Request):
         data = await request.json()
         client_ip = request.client.host
         logger.info(f"Received data from {client_ip}: {data}")
+        
+        await save_to_database(data)
 
         # Check required fields
         system_id = data.get("system_id")
@@ -74,6 +142,7 @@ async def receive_webhook(request: Request):
         command_id = data.get("command_id")
         destination_addr = data.get("destination_addr")
         text_message = data.get("short_message")
+        message_id = data.get("message_id")
         otp = extract_otp(text_message)
         logger.info(f"WhatsApp API response: system_id: {system_id}, bind_type {bind_type}, command_id {command_id}")
         if (
@@ -92,6 +161,7 @@ async def receive_webhook(request: Request):
                     template_name=TEMPLATE_NAME,
                     language=LANGUAGE,
                     contact=destination_addr,
+                    message_id=message_id,
                     variables=variables
                 )
                 logger.info(f"WhatsApp API response: {result}")
@@ -101,24 +171,8 @@ async def receive_webhook(request: Request):
     except Exception as e:
         logger.error(f"Error while processing request: {e}")
         return {"status": "error", "message": str(e)}
-
-# --- Logs API ---
-@app.get("/logs")
-def get_logs(
-    lines: Optional[int] = 100,
-    user: str = Depends(authenticate)
-):
-    if not os.path.exists(log_path):
-        raise HTTPException(status_code=404, detail="Log file not found")
-
-    try:
-        with open(log_path, "r") as f:
-            all_lines = f.readlines()
-            return {"log_lines": all_lines[-lines:]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read logs: {e}")
     
-async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, variables: ty.Optional[ty.List[str]] = None) -> None:
+async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, message_id: str, variables: ty.Optional[ty.List[str]] = None) -> None:
     url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -177,6 +231,16 @@ async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_num
         async with session.post(url, json=payload, headers=headers) as response:
             response_text = await response.text()
             if response.status == 200:
+                logger.info(f"WhatsApp API success response: {response_text}")
+
+                # Parse the wamid
+                response_json = await response.json()
+                wamid = response_json.get("messages", [{}])[0].get("id")
+
+                # Update wamid in database
+                if wamid:
+                    await update_wamid_in_database(message_id, wamid)
+
                 return {
                     "status": "success",
                     "contact": contact,
