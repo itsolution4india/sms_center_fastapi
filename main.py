@@ -145,26 +145,21 @@ async def receive_webhook(request: Request):
         message_id = data.get("message_id")
         otp = extract_otp(text_message)
         logger.info(f"WhatsApp API response: system_id: {system_id}, bind_type {bind_type}, command_id {command_id}")
-        if (
-            system_id == "userone" and
-            "bind_transceiver" in bind_type and
-            command_id == "CommandId.submit_sm"
-        ):
-            variables = [f"{otp}"]  # You can generate or extract dynamically
-            logger.info(f"Triggering WhatsApp OTP to {destination_addr} with variables {variables}")
+        variables = [f"{otp}"]  # You can generate or extract dynamically
+        logger.info(f"Triggering WhatsApp OTP to {destination_addr} with variables {variables}")
 
-            async with aiohttp.ClientSession() as session:
-                result = await send_otp_message(
-                    session=session,
-                    token=WHATSAPP_TOKEN,
-                    phone_number_id=PHONE_NUMBER_ID,
-                    template_name=TEMPLATE_NAME,
-                    language=LANGUAGE,
-                    contact=destination_addr,
-                    message_id=message_id,
-                    variables=variables
-                )
-                logger.info(f"WhatsApp API response: {result}")
+        async with aiohttp.ClientSession() as session:
+            result = await send_otp_message(
+                session=session,
+                token=WHATSAPP_TOKEN,
+                phone_number_id=PHONE_NUMBER_ID,
+                template_name=TEMPLATE_NAME,
+                language=LANGUAGE,
+                contact=destination_addr,
+                message_id=message_id,
+                variables=variables
+            )
+            logger.info(f"WhatsApp API response: {result}")
 
         return {"status": "received"}
 
