@@ -51,8 +51,8 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
 
 # WhatsApp configuration
 WHATSAPP_TOKEN = "EAAGZBdt7VWLcBO8nr7i8nChTcNXzWF9aNMjPYVjjKU7BbNfIJGETpZAJY3A2y9vLxzo4xZCace1xKiqG7jS7772Hpak96BPl360cG8Dzt83ujr8BSwGyUbNRS2mIjwZBfUwhNFKXtpFZC2QJ9Lh6OcKLRuoNJ1sAXGk2LZBkNu9BN7JSpBbTnU2vR6neoYv4FFUwZDZD"
-PHONE_NUMBER_ID = "625326003995211"
-TEMPLATE_NAME = "authtemp782"
+PHONE_NUMBER_ID = "498352686693631"
+TEMPLATE_NAME = "testauthtemp875"
 LANGUAGE = "en"
 
 def extract_otp(text_message: str) -> str:
