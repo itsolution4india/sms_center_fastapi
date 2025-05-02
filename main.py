@@ -90,8 +90,8 @@ async def save_to_database(data):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                INSERT INTO smsc_responses (system_id, bindtype, username, session_id, source_addr, destination_addr, short_message, wamid, message_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO smsc_responses (username, source_addr, destination_addr, short_message, wamid, message_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 data.get("username"),
                 data.get("source_addr"),
@@ -126,11 +126,10 @@ async def update_wamid_in_database(message_id: str, wamid: str):
 # --- Webhook ---
 @app.post("/webhook")
 async def receive_webhook(request: Request):
+    data = await request.json()
+    client_ip = request.client.host
+    logger.info(f"Received data from {client_ip}: {data}")
     try:
-        data = await request.json()
-        client_ip = request.client.host
-        logger.info(f"Received data from {client_ip}: {data}")
-        
         await save_to_database(data)
 
         destination_addr = data.get("destination_addr")
@@ -139,7 +138,7 @@ async def receive_webhook(request: Request):
         otp = extract_otp(text_message)
         variables = [f"{otp}"]
         logger.info(f"Triggering WhatsApp OTP to {destination_addr} with variables {variables}")
-
+        
         async with aiohttp.ClientSession() as session:
             result = await send_otp_message(
                 session=session,
