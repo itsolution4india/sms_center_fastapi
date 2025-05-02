@@ -93,14 +93,11 @@ async def save_to_database(data):
                 INSERT INTO smsc_responses (system_id, bindtype, username, session_id, source_addr, destination_addr, short_message, wamid, message_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                data.get("system_id"),
-                data.get("bind_type"),
                 data.get("username"),
-                data.get("session_id"),
                 data.get("source_addr"),
                 data.get("destination_addr"),
                 data.get("short_message"),
-                None,  # wamid (you can update later)
+                None,
                 data.get("message_id")
             ))
     pool.close()
@@ -136,16 +133,11 @@ async def receive_webhook(request: Request):
         
         await save_to_database(data)
 
-        # Check required fields
-        system_id = data.get("system_id")
-        bind_type = data.get("bind_type", "")
-        command_id = data.get("command_id")
         destination_addr = data.get("destination_addr")
         text_message = data.get("short_message")
         message_id = data.get("message_id")
         otp = extract_otp(text_message)
-        logger.info(f"WhatsApp API response: system_id: {system_id}, bind_type {bind_type}, command_id {command_id}")
-        variables = [f"{otp}"]  # You can generate or extract dynamically
+        variables = [f"{otp}"]
         logger.info(f"Triggering WhatsApp OTP to {destination_addr} with variables {variables}")
 
         async with aiohttp.ClientSession() as session:
