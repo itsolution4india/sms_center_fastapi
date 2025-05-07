@@ -52,7 +52,7 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
 
 
 def extract_otp(text_message: str) -> str:
-    match = re.search(r"\b\d{6}\b", text_message)
+    match = re.search(r"\b\d{4,6}\b", text_message)
     if match:
         return match.group()
     return None
