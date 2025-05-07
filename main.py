@@ -119,6 +119,26 @@ async def update_wamid_in_database(message_id: str, wamid: str):
     pool.close()
     await pool.wait_closed()
     
+async def deduct_coin_for_user(username: str):
+    pool = await aiomysql.create_pool(
+        host='localhost',
+        port=3306,
+        user='prashanth@itsolution4india.com',
+        password='Solution@97',
+        db='smsc_table',
+        autocommit=True
+    )
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                UPDATE whatsapp_services
+                SET balance = balance - 1
+                WHERE username = %s AND balance > 0
+            """, (username,))
+    pool.close()
+    await pool.wait_closed()
+    
 async def get_user_config(username: str):
     pool = await aiomysql.create_pool(
         host='localhost',
@@ -145,7 +165,7 @@ async def process_messages_in_chunks(messages, tps, send_func):
         await asyncio.sleep(1)  # Wait 1 second between chunks
 
 
-async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, message_id: str, variables: ty.Optional[ty.List[str]] = None) -> None:
+async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, message_id: str, username: str, variables: ty.Optional[ty.List[str]] = None) -> None:
     url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -213,6 +233,7 @@ async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_num
                 # Update wamid in database
                 if wamid:
                     await update_wamid_in_database(message_id, wamid)
+                    await deduct_coin_for_user(username)
 
                 return {
                     "status": "success",
@@ -268,6 +289,7 @@ async def receive_webhook(request: Request):
             "language": language,
             "contact": destination_addr,
             "message_id": message_id,
+            "username": username,
             "variables": variables
         }
 
@@ -281,6 +303,7 @@ async def receive_webhook(request: Request):
                     language=msg["language"],
                     contact=msg["contact"],
                     message_id=msg["message_id"],
+                    username=msg["username"],
                     variables=msg["variables"]
                 )
 
