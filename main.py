@@ -296,7 +296,7 @@ async def receive_webhook(request: Request):
         language = user_config["language"]
 
         # Prepare message
-        otp = extract_otp(text_message)
+        otp = extract_otp(str(text_message))
         variables = [otp]
         message_obj = {
             "token": token,
