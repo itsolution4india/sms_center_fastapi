@@ -55,6 +55,22 @@ def extract_otp(text_message: str) -> str:
     match = re.search(r"\b\d{4,6}\b", text_message)
     if match:
         return match.group()
+    
+    if '\x00' in text_message:
+        cleaned = ''.join(c for c in text_message if c != '\x00')
+        match = re.search(r"\b\d{4,6}\b", cleaned)
+        if match:
+            return match.group()
+    
+    try:
+        if '\\x' in repr(text_message):
+            decoded = text_message.encode().decode('unicode_escape')
+            match = re.search(r"\b\d{4,6}\b", decoded)
+            if match:
+                return match.group()
+    except Exception:
+        pass
+    
     return None
 
 # --- Logs API ---
