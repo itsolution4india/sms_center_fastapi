@@ -89,7 +89,33 @@ def get_logs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read logs: {e}")
 
-async def save_to_database(data):
+# async def save_to_database(data):
+#     pool = await aiomysql.create_pool(
+#         host='localhost',
+#         port=3306,
+#         user='prashanth@itsolution4india.com',
+#         password='Solution@97',
+#         db='smsc_table',
+#         autocommit=True
+#     )
+
+#     async with pool.acquire() as conn:
+#         async with conn.cursor() as cur:
+#             await cur.execute("""
+#                 INSERT INTO smsc_responses (username, source_addr, destination_addr, short_message, wamid, message_id)
+#                 VALUES (%s, %s, %s, %s, %s, %s)
+#             """, (
+#                 data.get("username"),
+#                 data.get("source_addr"),
+#                 data.get("destination_addr"),
+#                 data.get("short_message"),
+#                 None,
+#                 data.get("message_id")
+#             ))
+#     pool.close()
+#     await pool.wait_closed()
+
+async def save_to_database(message_id: str, username: str, source_addr: str, contact: str, short_message: str):
     pool = await aiomysql.create_pool(
         host='localhost',
         port=3306,
@@ -101,21 +127,21 @@ async def save_to_database(data):
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Insert a new record if wamid doesn't exist
             await cur.execute("""
-                INSERT INTO smsc_responses (username, source_addr, destination_addr, short_message, wamid, message_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                data.get("username"),
-                data.get("source_addr"),
-                data.get("destination_addr"),
-                data.get("short_message"),
-                None,
-                data.get("message_id")
-            ))
+                INSERT INTO smsc_responses (
+                    message_id,
+                    username,
+                    source_addr,
+                    destination_addr,
+                    short_message
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+            """, (message_id, username, source_addr, contact, short_message))
+
     pool.close()
     await pool.wait_closed()
 
-async def update_wamid_in_database(message_id: str, wamid: str):
+async def update_wamid_in_database(message_id: str, wamid: str, username: str, source_addr: str, contact: str, short_message: str):
     pool = await aiomysql.create_pool(
         host='localhost',
         port=3306,
@@ -127,11 +153,34 @@ async def update_wamid_in_database(message_id: str, wamid: str):
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("""
-                UPDATE smsc_responses
-                SET wamid = %s
-                WHERE message_id = %s
-            """, (wamid, message_id))
+            # Check if the wamid already exists
+            await cur.execute("SELECT id FROM smsc_responses WHERE wamid = %s", (wamid,))
+            result = await cur.fetchone()
+
+            if result:
+                # Update the record if wamid exists
+                await cur.execute("""
+                    UPDATE smsc_responses
+                    SET message_id = %s,
+                        username = %s,
+                        source_addr = %s,
+                        destination_addr = %s,
+                        short_message = %s
+                    WHERE wamid = %s
+                """, (message_id, username, source_addr, contact, short_message, wamid))
+            else:
+                # Insert a new record if wamid doesn't exist
+                await cur.execute("""
+                    INSERT INTO smsc_responses (
+                        wamid,
+                        message_id,
+                        username,
+                        source_addr,
+                        destination_addr,
+                        short_message
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                """, (wamid, message_id, username, source_addr, contact, short_message))
+
     pool.close()
     await pool.wait_closed()
     
@@ -181,7 +230,7 @@ async def process_messages_in_chunks(messages, tps, send_func):
         await asyncio.sleep(1)  # Wait 1 second between chunks
 
 
-async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, message_id: str, username: str, variables: ty.Optional[ty.List[str]] = None) -> None:
+async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, message_id: str, username: str, short_message: str, source_addr: str, variables: ty.Optional[ty.List[str]] = None) -> None:
     url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -248,8 +297,10 @@ async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_num
 
                 # Update wamid in database
                 if wamid:
-                    await update_wamid_in_database(message_id, wamid)
+                    await update_wamid_in_database(message_id, wamid, username, source_addr, contact, short_message)
                     await deduct_coin_for_user(username)
+                else:
+                    await save_to_database(message_id, username, source_addr, contact, short_message)
 
                 return {
                     "status": "success",
@@ -281,11 +332,13 @@ async def receive_webhook(request: Request):
     logger.info(f"Received data from {client_ip}: {data}")
 
     try:
-        await save_to_database(data)
+        # await save_to_database(data)
         username = data.get("username")
         destination_addr = data.get("destination_addr")
         text_message = data.get("short_message")
         message_id = data.get("message_id")
+        
+        source_addr = data.get("source_addr"),
 
         # Get config from DB
         user_config = await get_user_config(username)
@@ -306,7 +359,9 @@ async def receive_webhook(request: Request):
             "contact": destination_addr,
             "message_id": message_id,
             "username": username,
-            "variables": variables
+            "variables": variables,
+            "short_message": text_message,
+            "source_addr": source_addr
         }
 
         async def send_func(msg):
@@ -320,6 +375,8 @@ async def receive_webhook(request: Request):
                     contact=msg["contact"],
                     message_id=msg["message_id"],
                     username=msg["username"],
+                    short_message=msg['short_message'],
+                    source_addr=msg['source_addr'],
                     variables=msg["variables"]
                 )
 
