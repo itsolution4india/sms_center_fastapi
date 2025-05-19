@@ -121,7 +121,7 @@ async def save_to_database(message_id: str, username: str, source_addr: str, con
         port=3306,
         user='prashanth@itsolution4india.com',
         password='Solution@97',
-        db='smsc_table',
+        db='smsc_db',
         autocommit=True
     )
 
@@ -147,7 +147,7 @@ async def update_wamid_in_database(message_id: str, wamid: str, username: str, s
         port=3306,
         user='prashanth@itsolution4india.com',
         password='Solution@97',
-        db='smsc_table',
+        db='smsc_db',
         autocommit=True
     )
 
@@ -190,7 +190,7 @@ async def deduct_coin_for_user(username: str):
         port=3306,
         user='prashanth@itsolution4india.com',
         password='Solution@97',
-        db='smsc_table',
+        db='smsc_db',
         autocommit=True
     )
 
@@ -210,7 +210,7 @@ async def get_user_config(username: str):
         port=3306,
         user='prashanth@itsolution4india.com',
         password='Solution@97',
-        db='smsc_table',
+        db='smsc_db',
         autocommit=True
     )
 
