@@ -10,6 +10,7 @@ import typing as ty
 import json
 import re
 import aiomysql
+import asyncio
 
 app = FastAPI()
 
@@ -49,16 +50,27 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
-# WhatsApp configuration
-WHATSAPP_TOKEN = "EAAGZBdt7VWLcBO8nr7i8nChTcNXzWF9aNMjPYVjjKU7BbNfIJGETpZAJY3A2y9vLxzo4xZCace1xKiqG7jS7772Hpak96BPl360cG8Dzt83ujr8BSwGyUbNRS2mIjwZBfUwhNFKXtpFZC2QJ9Lh6OcKLRuoNJ1sAXGk2LZBkNu9BN7JSpBbTnU2vR6neoYv4FFUwZDZD"
-PHONE_NUMBER_ID = "498352686693631"
-TEMPLATE_NAME = "testauthtemp875"
-LANGUAGE = "en"
 
 def extract_otp(text_message: str) -> str:
-    match = re.search(r"\b\d{6}\b", text_message)
+    match = re.search(r"\b\d{4,6}\b", text_message)
     if match:
         return match.group()
+    
+    if '\x00' in text_message:
+        cleaned = ''.join(c for c in text_message if c != '\x00')
+        match = re.search(r"\b\d{4,6}\b", cleaned)
+        if match:
+            return match.group()
+    
+    try:
+        if '\\x' in repr(text_message):
+            decoded = text_message.encode().decode('unicode_escape')
+            match = re.search(r"\b\d{4,6}\b", decoded)
+            if match:
+                return match.group()
+    except Exception:
+        pass
+    
     return None
 
 # --- Logs API ---
@@ -77,88 +89,148 @@ def get_logs(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read logs: {e}")
 
-async def save_to_database(data):
+# async def save_to_database(data):
+#     pool = await aiomysql.create_pool(
+#         host='localhost',
+#         port=3306,
+#         user='prashanth@itsolution4india.com',
+#         password='Solution@97',
+#         db='smsc_table',
+#         autocommit=True
+#     )
+
+#     async with pool.acquire() as conn:
+#         async with conn.cursor() as cur:
+#             await cur.execute("""
+#                 INSERT INTO smsc_responses (username, source_addr, destination_addr, short_message, wamid, message_id)
+#                 VALUES (%s, %s, %s, %s, %s, %s)
+#             """, (
+#                 data.get("username"),
+#                 data.get("source_addr"),
+#                 data.get("destination_addr"),
+#                 data.get("short_message"),
+#                 None,
+#                 data.get("message_id")
+#             ))
+#     pool.close()
+#     await pool.wait_closed()
+
+async def save_to_database(message_id: str, username: str, source_addr: str, contact: str, short_message: str):
     pool = await aiomysql.create_pool(
         host='localhost',
         port=3306,
         user='prashanth@itsolution4india.com',
         password='Solution@97',
-        db='smsc_table',
+        db='smsc_db',
         autocommit=True
     )
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Insert a new record if wamid doesn't exist
             await cur.execute("""
-                INSERT INTO smsc_responses (username, source_addr, destination_addr, short_message, wamid, message_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                data.get("username"),
-                data.get("source_addr"),
-                data.get("destination_addr"),
-                data.get("short_message"),
-                None,
-                data.get("message_id")
-            ))
+                INSERT INTO smsc_responses (
+                    message_id,
+                    username,
+                    source_addr,
+                    destination_addr,
+                    short_message
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+            """, (message_id, username, source_addr, contact, short_message))
+
     pool.close()
     await pool.wait_closed()
 
-async def update_wamid_in_database(message_id: str, wamid: str):
+async def update_wamid_in_database(message_id: str, wamid: str, username: str, source_addr: str, contact: str, short_message: str):
     pool = await aiomysql.create_pool(
         host='localhost',
         port=3306,
         user='prashanth@itsolution4india.com',
         password='Solution@97',
-        db='smsc_table',
+        db='smsc_db',
         autocommit=True
     )
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("""
-                UPDATE smsc_responses
-                SET wamid = %s
-                WHERE message_id = %s
-            """, (wamid, message_id))
+            # Check if the wamid already exists
+            await cur.execute("SELECT id FROM smsc_responses WHERE wamid = %s", (wamid,))
+            result = await cur.fetchone()
+
+            if result:
+                # Update the record if wamid exists
+                await cur.execute("""
+                    UPDATE smsc_responses
+                    SET message_id = %s,
+                        username = %s,
+                        source_addr = %s,
+                        destination_addr = %s,
+                        short_message = %s
+                    WHERE wamid = %s
+                """, (message_id, username, source_addr, contact, short_message, wamid))
+            else:
+                # Insert a new record if wamid doesn't exist
+                await cur.execute("""
+                    INSERT INTO smsc_responses (
+                        wamid,
+                        message_id,
+                        username,
+                        source_addr,
+                        destination_addr,
+                        short_message
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                """, (wamid, message_id, username, source_addr, contact, short_message))
+
     pool.close()
     await pool.wait_closed()
-
-# --- Webhook ---
-@app.post("/webhook")
-async def receive_webhook(request: Request):
-    data = await request.json()
-    client_ip = request.client.host
-    logger.info(f"Received data from {client_ip}: {data}")
-    try:
-        await save_to_database(data)
-
-        destination_addr = data.get("destination_addr")
-        text_message = data.get("short_message")
-        message_id = data.get("message_id")
-        otp = extract_otp(text_message)
-        variables = [f"{otp}"]
-        logger.info(f"Triggering WhatsApp OTP to {destination_addr} with variables {variables}")
-        
-        async with aiohttp.ClientSession() as session:
-            result = await send_otp_message(
-                session=session,
-                token=WHATSAPP_TOKEN,
-                phone_number_id=PHONE_NUMBER_ID,
-                template_name=TEMPLATE_NAME,
-                language=LANGUAGE,
-                contact=destination_addr,
-                message_id=message_id,
-                variables=variables
-            )
-            logger.info(f"WhatsApp API response: {result}")
-
-        return {"status": "received"}
-
-    except Exception as e:
-        logger.error(f"Error while processing request: {e}")
-        return {"status": "error", "message": str(e)}
     
-async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, message_id: str, variables: ty.Optional[ty.List[str]] = None) -> None:
+async def deduct_coin_for_user(username: str):
+    pool = await aiomysql.create_pool(
+        host='localhost',
+        port=3306,
+        user='prashanth@itsolution4india.com',
+        password='Solution@97',
+        db='smsc_db',
+        autocommit=True
+    )
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                UPDATE whatsapp_services
+                SET balance = balance - 1
+                WHERE username = %s AND balance > 0
+            """, (username,))
+    pool.close()
+    await pool.wait_closed()
+    
+async def get_user_config(username: str):
+    pool = await aiomysql.create_pool(
+        host='localhost',
+        port=3306,
+        user='prashanth@itsolution4india.com',
+        password='Solution@97',
+        db='smsc_db',
+        autocommit=True
+    )
+
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT * FROM whatsapp_services WHERE username=%s", (username,))
+            row = await cur.fetchone()
+            if row:
+                return row
+            else:
+                raise ValueError(f"User {username} not found")
+    
+async def process_messages_in_chunks(messages, tps, send_func):
+    for i in range(0, len(messages), tps):
+        chunk = messages[i:i + tps]
+        await asyncio.gather(*(send_func(msg) for msg in chunk))
+        await asyncio.sleep(1)  # Wait 1 second between chunks
+
+
+async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_number_id: str, template_name: str, language: str, contact: str, message_id: str, username: str, short_message: str, source_addr: str, variables: ty.Optional[ty.List[str]] = None) -> None:
     url = f"https://graph.facebook.com/v20.0/{phone_number_id}/messages"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -225,7 +297,10 @@ async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_num
 
                 # Update wamid in database
                 if wamid:
-                    await update_wamid_in_database(message_id, wamid)
+                    await update_wamid_in_database(message_id, wamid, username, source_addr, contact, short_message)
+                    await deduct_coin_for_user(username)
+                else:
+                    await save_to_database(message_id, username, source_addr, contact, short_message)
 
                 return {
                     "status": "success",
@@ -249,6 +324,70 @@ async def send_otp_message(session: aiohttp.ClientSession, token: str, phone_num
             "error_code": "client_error",
             "error_message": str(e)
         }
+
+@app.post("/webhook")
+async def receive_webhook(request: Request):
+    data = await request.json()
+    client_ip = request.client.host
+    logger.info(f"Received data from {client_ip}: {data}")
+
+    try:
+        # await save_to_database(data)
+        username = data.get("username")
+        destination_addr = data.get("destination_addr")
+        text_message = data.get("short_message")
+        message_id = data.get("message_id")
+        
+        source_addr = data.get("source_addr"),
+
+        # Get config from DB
+        user_config = await get_user_config(username)
+        tps = user_config["tps"]
+        token = user_config["token"]
+        phone_number_id = str(user_config["phone_id"])
+        template_name = user_config["template_name"]
+        language = user_config["language"]
+
+        # Prepare message
+        otp = extract_otp(str(text_message))
+        variables = [otp]
+        message_obj = {
+            "token": token,
+            "phone_number_id": phone_number_id,
+            "template_name": template_name,
+            "language": language,
+            "contact": destination_addr,
+            "message_id": message_id,
+            "username": username,
+            "variables": variables,
+            "short_message": text_message,
+            "source_addr": source_addr
+        }
+
+        async def send_func(msg):
+            async with aiohttp.ClientSession() as session:
+                await send_otp_message(
+                    session=session,
+                    token=msg["token"],
+                    phone_number_id=msg["phone_number_id"],
+                    template_name=msg["template_name"],
+                    language=msg["language"],
+                    contact=msg["contact"],
+                    message_id=msg["message_id"],
+                    username=msg["username"],
+                    short_message=msg['short_message'],
+                    source_addr=msg['source_addr'],
+                    variables=msg["variables"]
+                )
+
+        # Send the message (1 per webhook, but prepared for batch)
+        await process_messages_in_chunks([message_obj], tps, send_func)
+
+        return {"status": "received"}
+
+    except Exception as e:
+        logger.error(f"Error while processing request: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.get("/")
 def root():

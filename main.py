@@ -222,6 +222,30 @@ async def get_user_config(username: str):
                 return row
             else:
                 raise ValueError(f"User {username} not found")
+
+async def get_whatsapp_config(username: str):
+    pool = await aiomysql.create_pool(
+        host='localhost',
+        port=3306,
+        user='prashanth@itsolution4india.com',
+        password='Solution@97',
+        db='smsc_db',
+        autocommit=True
+    )
+
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("""
+                SELECT phone_id, token, template_name 
+                FROM whatsapp_numbers 
+                WHERE username = %s AND number_status = 'active'
+                ORDER BY created_at DESC LIMIT 1
+            """, (username,))
+            row = await cur.fetchone()
+            if row:
+                return row
+            else:
+                raise ValueError(f"No active WhatsApp config found for user {username}")
     
 async def process_messages_in_chunks(messages, tps, send_func):
     for i in range(0, len(messages), tps):
@@ -343,10 +367,12 @@ async def receive_webhook(request: Request):
         # Get config from DB
         user_config = await get_user_config(username)
         tps = user_config["tps"]
-        token = user_config["token"]
-        phone_number_id = str(user_config["phone_id"])
-        template_name = user_config["template_name"]
         language = user_config["language"]
+
+        whatsapp_config = await get_whatsapp_config(username)
+        token = whatsapp_config["token"]
+        phone_number_id = str(whatsapp_config["phone_id"])
+        template_name = whatsapp_config["template_name"]
 
         # Prepare message
         otp = extract_otp(str(text_message))
